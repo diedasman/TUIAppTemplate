@@ -1,0 +1,136 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: "3.12"
+  APP_NAME: TUIAppTemplate
+  PACKAGE_NAME: tui_template
+  ENTRYPOINT: src/tui_template/__main__.py
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            os: ubuntu-latest
+            executable: TUIAppTemplate
+            archive: TUIAppTemplate-linux-x64.tar.gz
+          - platform: windows-x64
+            os: windows-latest
+            executable: TUIAppTemplate.exe
+            archive: TUIAppTemplate-windows-x64.zip
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" pyinstaller
+
+      - name: Run Ruff
+        run: python -m ruff check src tests
+
+      - name: Run pytest
+        run: python -m pytest
+
+      - name: Build executable
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            data_sep=";"
+          else
+            data_sep=":"
+          fi
+
+          python -m PyInstaller \
+            --name "${APP_NAME}" \
+            --onefile \
+            --clean \
+            --noconfirm \
+            --console \
+            --collect-all textual \
+            --collect-all textual_serve \
+            --collect-data "${PACKAGE_NAME}" \
+            --add-data "src/${PACKAGE_NAME}/app.tcss${data_sep}${PACKAGE_NAME}" \
+            --add-data "src/${PACKAGE_NAME}/assets${data_sep}${PACKAGE_NAME}/assets" \
+            "${ENTRYPOINT}"
+
+      - name: Stage release package
+        run: |
+          mkdir -p "package/${APP_NAME}"
+          cp "dist/${{ matrix.executable }}" "package/${APP_NAME}/"
+          cp README.md LICENSE "package/${APP_NAME}/"
+
+      - name: Create Linux archive
+        if: runner.os == 'Linux'
+        run: tar -czf "${{ matrix.archive }}" -C package "${APP_NAME}"
+
+      - name: Create Windows archive
+        if: runner.os == 'Windows'
+        run: 7z a "${{ matrix.archive }}" ./package/${APP_NAME}/*
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: ${{ matrix.archive }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Read project version
+        id: version
+        run: |
+          version="$(PYTHONPATH=src python -c 'import tui_template; print(tui_template.__version__)')"
+          echo "version=${version}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          target_commitish: main
+          name: TUI App Template v${{ steps.version.outputs.version }}
+          body: |
+            Automated release from the main branch.
+
+            Includes Linux and Windows standalone builds.
+          files: release-assets/*
+          generate_release_notes: true
+          make_latest: true

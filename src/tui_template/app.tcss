@@ -1,0 +1,21 @@
+Screen {
+    align: center middle;
+    background: $background;
+}
+
+#app-shell {
+    width: 100%;
+    height: 100%;
+    align: center middle;
+}
+
+#logo-panel {
+    width: auto;
+    max-width: 92;
+    height: auto;
+    padding: 1 2;
+    border: round $primary;
+    background: $surface;
+    color: $accent;
+    text-align: center;
+}
