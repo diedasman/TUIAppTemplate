@@ -10,3 +10,4 @@ dist/
 htmlcov/
 package/
 release-assets/
+.vscode
